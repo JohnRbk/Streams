@@ -1,14 +1,17 @@
 # Streams
 
-Generate beautiful images from PostGIS, ideally suited for rendering rivers and streams.
+Generate beautiful images as PNG or vector PDF files from PostGIS, ideally suited for rendering rivers and streams such as the [National Hydrography Dataset](https://www.usgs.gov/core-science-systems/ngp/national-hydrography).
 
 ![US Rivers](Images/us-rivers.png)
 
-*(High-res image is available [here](Images/us-rivers-high-res.png))*
+*(High-res image is available [here](us-rivers-high-res.png))*
+
 
 ## Getting Started 
 
-### Caveats
+### Motivation
+
+QGIS and Mapbox are great tools for styling map data. For quick visualizations, however, they may not be the best tools. [GDAL rasterize](https://www.gdal.org/gdal_rasterize.html) and built-in PostGIS functions such as [ST_AsPNG](https://postgis.net/docs/RT_ST_AsPNG.html) also provide decent alternatives, but lack some of the styling options provided by Apple's CoreGraphics.
 
 The current version only supports geometries of type LINESTRING.
 
