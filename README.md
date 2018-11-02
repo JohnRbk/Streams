@@ -4,7 +4,7 @@ Generate beautiful images from PostGIS, ideally suited for rendering rivers and 
 
 ![US Rivers](Images/us-rivers.png)
 
-*(High-res image is available [here](us-rivers-high-res.png))*
+*(High-res image is available [here](Images/us-rivers-high-res.png))*
 
 ## Getting Started 
 
