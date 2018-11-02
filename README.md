@@ -10,9 +10,7 @@ Generate beautiful images as PNG or vector PDF files from PostGIS, ideally suite
 
 [Link to high-res image](Images/northeast-high-res.png)
 
-## Getting Started 
-
-### Motivation
+## Motivation
 
 QGIS and Mapbox are great tools for styling map data. For quick visualizations, however, they may be too complicated. [GDAL rasterize](https://www.gdal.org/gdal_rasterize.html) and built-in PostGIS functions such as [ST_AsPNG](https://postgis.net/docs/RT_ST_AsPNG.html) provide good capabilities to render images from a database, but lack some of the styling options provided by Apple's CoreGraphics. 
 
@@ -20,7 +18,7 @@ The `gen_image` tool was purpose-built to run efficiently and generate large ima
 
 Note: The current version of `gen_image` only supports geometries of type LINESTRING.
 
-### Prerequisites
+## Prerequisites
 
 [Libgeos](https://trac.osgeo.org/geos/) is required. Download the latest version, build it and install it using the default settings. The Makefile looks for the library in /usr/local/lib.
 
@@ -49,7 +47,7 @@ where us.stusps = 'NY'" \
 -progress -f foo.png
 ```
 
-### Installing
+## Installing
 
 Build `gen_image` using XCode or the included Makefile
 
