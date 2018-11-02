@@ -14,9 +14,11 @@ Generate beautiful images as PNG or vector PDF files from PostGIS, ideally suite
 
 ### Motivation
 
-QGIS and Mapbox are great tools for styling map data. For quick visualizations, however, they may not be the best tools. [GDAL rasterize](https://www.gdal.org/gdal_rasterize.html) and built-in PostGIS functions such as [ST_AsPNG](https://postgis.net/docs/RT_ST_AsPNG.html) also provide decent alternatives, but lack some of the styling options provided by Apple's CoreGraphics.
+QGIS and Mapbox are great tools for styling map data. For quick visualizations, however, they may be too complicated. [GDAL rasterize](https://www.gdal.org/gdal_rasterize.html) and built-in PostGIS functions such as [ST_AsPNG](https://postgis.net/docs/RT_ST_AsPNG.html) provide good capabilities to render images from a database, but lack some of the styling options provided by Apple's CoreGraphics. 
 
-The current version only supports geometries of type LINESTRING.
+The `gen_image` tool was purpose-built to run efficiently and generate large images with little effort.
+
+Note: The current version of `gen_image` only supports geometries of type LINESTRING.
 
 ### Prerequisites
 
@@ -27,10 +29,12 @@ The commandline tool  `gen_image` requires a connection to a PostgreSQL database
 Generate an image from a table `nhdflowline` with a 1-pixel width:
 
 ```bash
-./gen_image -pg "host=localhost user=admin dbname=mydb password=XXX" -query "select shape, 1 from nhdflowline where id = 2" -f output.png 
+./gen_image -pg "host=localhost user=admin dbname=mydb password=XXX" -query "select st_astext(shape), 1 from nhdflowline where id = 2" -f output.png 
 ```
 
-Generate an image from a table centered around New York with a width calculated using the length. The `ST_Simplify` function improves rendering performance for large geometries.
+The query must contain two columns: the first must be a geography in WKT format (the st_astext function converts it to a WKT format). The second column must be a number corresponding to the width of the line that will be rendered.
+
+The following example show how to generate an image from a table centered around New York with a width calculated using the length. The `ST_Simplify` function improves rendering performance for large geometries.
 
 ```bash
 ./gen_image -pg "host=localhost user=admin dbname=mydb password=XXX" -query \
@@ -47,7 +51,7 @@ where us.stusps = 'NY'" \
 
 ### Installing
 
-Build using XCode or the included Makefile
+Build `gen_image` using XCode or the included Makefile
 
 ## Built With
 
