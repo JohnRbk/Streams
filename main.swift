@@ -8,6 +8,11 @@ struct Extents {
     let maxY: Double
 }
 
+enum FileFormat:String {
+    case png
+    case pdf
+}
+
 // Utility function to print progress
 var lastPercent: Int = -1
 func progress(_ current: Int, _ total: Int) {
@@ -26,11 +31,12 @@ func execSql(_ conn: OpaquePointer, _ sql: String) {
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         print("PQexec failed starting transaction: \(String(cString: PQerrorMessage(conn)))")
         PQclear(res)
-        exit(0)
+        exit(1)
     }
     PQclear(res)
 }
 
+// Utility to generate extents from a WTK string
 func getExtents(_ wkt: String) -> Extents {
 
     let GEOS_HANDLE = GEOS_init_r()
@@ -55,6 +61,7 @@ func getExtents(_ wkt: String) -> Extents {
 
 }
 
+// Utility to generate extents from an SQL query
 func getExtents(_ conn: OpaquePointer, _ query: String) -> Extents {
 
     print("Generating the extents")
@@ -64,7 +71,7 @@ func getExtents(_ conn: OpaquePointer, _ query: String) -> Extents {
     if PQresultStatus(res) != PGRES_TUPLES_OK {
         print("PQexec failed while getting extents: \(String(cString: PQerrorMessage(conn)))")
         PQclear(res)
-        exit(0)
+        exit(1)
     }
     let data = String.init(cString: PQgetvalue(res, 0, 0))
 
@@ -74,72 +81,55 @@ func getExtents(_ conn: OpaquePointer, _ query: String) -> Extents {
 
 }
 
+// Commandline argument utility
+func getRequiredOpt(option: String, errorMessage: String) -> String {
+    guard let index = CommandLine.arguments.index(of: option), CommandLine.arguments.indices.contains(index + 1) else {
+        print(errorMessage)
+        exit(1)
+    }
+    return CommandLine.arguments[index+1]
+}
+
+// Commandline argument utility
+func getOpt(option: String) -> String? {
+    guard let index = CommandLine.arguments.index(of: option), CommandLine.arguments.indices.contains(index + 1) else {
+        return nil
+    }
+    return CommandLine.arguments[index+1]
+}
+
 // Process commandline arguments
 
 if CommandLine.argc <= 1 || CommandLine.arguments.index(of: "-help") != nil || CommandLine.arguments.index(of: "-h") != nil {
-    print("-f:\t\t specify the filename to save the image")
-    print("-pg:\t\t set the database connection information in the format \"host=hostname.rds.amazonaws.com user=troutspotting dbname=xxx password=yyyy\"")
-    print("-query:\t\t an SQL querty that returns the geometry in WKT format along with a numerical value representing the line width")
-    print("-extents:\t optionally specify the extents, otherwise this is dynamically calculated")
-    print("-imageWidth:\t defaults to 5000; height is auto-calculated to maintain the aspect ratio of the image")
-    print("-format:\t defaulted to \"png\". Can be set to \"pdf\" but may not be well suited for large datasets")
-    print("-totalrows:\t If the -progress option is set, this parameter sets the total number of anticipated geometrue to be rendered. If not specified, the count is dynamically generated")
-    print("Example:")
-    print("./gen_image -pg \"host=hostname.rds.amazonaws.com user=username dbname=xxx password=yyyy\" -query \"with extents(geom) as (select st_geomfromtext('POLYGON((-129 23,-129 51,-62 51,-62 23,-129 23))')) select st_astext(shape) from streams join extents on shape && geom\" -extents \"POLYGON((-129 23,-129 51,-62 51,-62 23,-129 23))\" -f output.png")
+    print("""
+        -f:             Specify the filename to save the image
+        -pg:            Set the database connection information in the format \"host=hostname.rds.amazonaws.com user=troutspotting dbname=xxx password=yyyy\"
+        -query:         An SQL querty that returns the geometry in WKT format along with a numerical value representing the line width
+        -extents:       Optional. Specify the extents in WKT format, otherwise this is dynamically calculated
+        -imageWidth:    Defaults to 5000; height is auto-calculated to maintain the aspect ratio of the image
+        -scale:         Defaults to 1.0
+        -totalrows:     Optional, ignored if progress is not enabled. When set, it prevents a dynamic calculation of total rows of data to render, improving performance when the total row count calculation is time consuming.
+        Example:
+        ./gen_image -pg \"host=hostname.rds.amazonaws.com user=username dbname=xxx password=yyyy\" -query \"with extents(geom) as (select st_geomfromtext('POLYGON((-129 23,-129 51,-62 51,-62 23,-129 23))')) select st_astext(shape) from streams join extents on shape && geom\" -extents \"POLYGON((-129 23,-129 51,-62 51,-62 23,-129 23))\" -f output.png
+    """)
+    exit(1)
 }
 
-guard let pgIndex = CommandLine.arguments.index(of: "-pg"), CommandLine.arguments.indices.contains(pgIndex+1) else {
-    print("Need to provide pg parameter")
-    print("Example: -pg host=XXXXX-east-1.rds.amazonaws.com user=XXX dbname=XXX password=XXX")
-    exit(0)
+// Get commandline arguments
+let pq = getRequiredOpt(option: "-pg", errorMessage: "Need to provide -pg parameter")
+let query = getRequiredOpt(option: "-query", errorMessage: "Need to provide a query param using -query")
+let filePath = getRequiredOpt(option: "-f", errorMessage: "Need to specify an output file path using -f")
+let url = NSURL(fileURLWithPath: filePath)
+guard let fileSuffix = url.pathExtension, let format = FileFormat(rawValue: fileSuffix) else {
+    print("Invalid file format: \(filePath)")
+    exit(1)
 }
 
-let pq = CommandLine.arguments[pgIndex+1]
-
-guard let queryIndex = CommandLine.arguments.index(of: "-query"), CommandLine.arguments.indices.contains(queryIndex+1) else {
-    print("Need to provide query, such as:")
-    print("select st_astext(shape) from streams s join tl_2018_us_state us on s.shape && us.wkb_geometry where us.stusps = 'NY'")
-    exit(0)
-}
-
-let query = CommandLine.arguments[queryIndex+1]
-
-guard let filePathIndex = CommandLine.arguments.index(of: "-f"), CommandLine.arguments.indices.contains(filePathIndex+1) else {
-    print("Need to set a file path for output using -f [PATH]")
-    exit(0)
-}
-
-let filePath = CommandLine.arguments[filePathIndex+1]
-
-var format = "unknown"
-if filePath.hasSuffix("png") {
-    format = "png"
-} else if filePath.hasSuffix("pdf") {
-    format = "pdf"
-} else {
-    print("Unknown file format \(filePath) - file should be png or pdf")
-}
-
-var imageWidth = 5000
-if let widthIndex = CommandLine.arguments.index(of: "-width"), CommandLine.arguments.indices.contains(widthIndex+1),
-    Int(CommandLine.arguments[widthIndex+1]) != nil {
-    imageWidth = Int(CommandLine.arguments[widthIndex+1])!
-}
-
-var extentsProvided: String?
-if let extentsIndex = CommandLine.arguments.index(of: "-extents"), CommandLine.arguments.indices.contains(extentsIndex+1) {
-    extentsProvided = CommandLine.arguments[extentsIndex+1]
-}
-
-var printProgress = CommandLine.arguments.contains("-progress")
-
-var totalRows = 0
-if let totalRowsIndex = CommandLine.arguments.index(of: "-totalrows"), CommandLine.arguments.indices.contains(totalRowsIndex+1),
-    Int(CommandLine.arguments[totalRowsIndex+1]) != nil {
-    totalRows = Int(CommandLine.arguments[totalRowsIndex+1])!
-    printProgress = true
-}
-
+let imageWidth = getOpt(option: "-width") == nil ? 5000 : Int(getOpt(option: "-width")!)!
+let extentsProvided = getOpt(option: "-extents")
+let printProgress = CommandLine.arguments.contains("-progress")
+var totalRows = getOpt(option: "-totalrows") == nil ? 0 : Int(getOpt(option: "-totalrows")!)!
+var scale = getOpt(option: "-scale") == nil ? 1.0 : Double(getOpt(option: "-scale")!)!
 let increment = 1000 // the batch size of results fetched via a cursor
 
 print("Connecting to database using: \"\(pq)\"")
@@ -147,10 +137,27 @@ print("Output format: \(format)")
 print("Query: \"\(query)\"")
 print("Image Width: \(imageWidth)")
 print("File path: \(filePath)")
+print("Image scale: \(scale)")
 
+// Connect to the database
 guard let conn = PQconnectdb(pq), PQstatus(conn) == CONNECTION_OK else {
     print("Unable to connect to the database using \(pq)")
-    exit(0)
+    exit(1)
+}
+
+// If no estimate row count was provided using -totalrows, dynamically calculate it
+// This may be a slow query, so its generally best to estimate the total rows
+// for large data sets
+if printProgress && totalRows == 0 {
+    let res = PQexec(conn, "with data as (\(query)) select count(*) from data")
+    if PQresultStatus(res) != PGRES_TUPLES_OK {
+        print("PQexec failed declaring cursor: \(String(cString: PQerrorMessage(conn)))")
+        PQclear(res)
+        exit(1)
+    }
+    totalRows = Int(String(cString: PQgetvalue(res, 0, 0)))!
+    print("Total rows calculated as \(totalRows)")
+    PQclear(res)
 }
 
 // Get the extents
@@ -163,27 +170,27 @@ let imageHeight = Int(Double(imageWidth) / aspectRatio)
 print("Extents: \(extents)")
 print("lineWidth: \(lineWidth) lineHeight: \(lineHeight) aspectRatio: \(aspectRatio) imageWidth: \(imageWidth) imageHeight: \(imageHeight)")
 
+// Begin a transaction; this is required for a cursor
 execSql(conn, "BEGIN")
+
+// Using a cursor keeps memory usage to a minimim
 execSql(conn, "DECLARE mycursor CURSOR FOR \(query)")
 
+// Initialize the GEOS library. This is used to convert the PostGIS geometry into something
+// that can be used in code
 var GEOS_HANDLE = GEOS_init_r()
 let WKTReader = GEOSWKTReader_create_r(GEOS_HANDLE)
-let scale = 1.0
+
+// These ratios are used during the conversion of lat/lon to x/y screen coordinates
 let imageToLineWidthRatio = Double(imageWidth) / lineWidth
 let imageToLineHeightRatio = Double(imageHeight) / lineHeight
 
-print("Scale: \(scale) imageToLineWidthRatio: \(imageToLineWidthRatio) imageToLineHeightRatio: \(imageToLineHeightRatio) ")
-
 // Init CoreGraphics
-
 let colorSpace = CGColorSpaceCreateDeviceRGB()
 let size = CGSize(width: imageWidth, height: imageHeight)
-
-let url = NSURL(fileURLWithPath: filePath)
-
 var context: CGContext?
 
-if format == "png" {
+if format == .png {
     let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
     context = CGContext.init(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: bitmapInfo.rawValue)
 } else {
@@ -195,30 +202,21 @@ if format == "png" {
 }
 
 context?.setShouldAntialias(true)
-context?.setStrokeColor(CGColor.white)
-context?.setFillColor(CGColor.black)
+//context?.setFillColor(.black)
+//context?.setStrokeColor(.white)
+context?.setFillColor(.white)
+let darkBlue = CGColor(red: 0.495, green: 0.615, blue: 0.905, alpha: 1.0)
+let lightBlue = CGColor(red: 0.125, green: 0.278, blue: 0.615, alpha: 1.0)
+context?.setStrokeColor(lightBlue)
+
 context?.fill(CGRect(origin: CGPoint(x: 0, y: 0), size: size))
 context?.setLineCap(.round)
 context?.setLineJoin(.round)
-
-// Progress meter
-if printProgress && totalRows == 0 {
-    let res = PQexec(conn, "with data as (\(query)) select count(*) from data")
-    if PQresultStatus(res) != PGRES_TUPLES_OK {
-        print("PQexec failed declaring cursor: \(String(cString: PQerrorMessage(conn)))")
-        PQclear(res)
-        exit(0)
-    }
-    totalRows = Int(String(cString: PQgetvalue(res, 0, 0)))!
-    print("Total rows calculated as \(totalRows)")
-    PQclear(res)
-}
 
 var hasData = true
 var count = 0
 
 print("Start rendering...")
-
 
 while hasData {
 
@@ -226,7 +224,7 @@ while hasData {
     if PQresultStatus(res) != PGRES_TUPLES_OK {
         print("PQexec failed declaring cursor: \(String(cString: PQerrorMessage(conn)))")
         PQclear(res)
-        exit(0)
+        exit(1)
     }
     
     let numRows = PQntuples(res)
@@ -246,45 +244,45 @@ while hasData {
  
         let data = String(cString: PQgetvalue(res, row, 0))
         
-        var length:CGFloat = CGFloat(Float(String(cString: PQgetvalue(res, row, 1)))!)
-        if length > 10 {
-            length = 1.0
-        }
+        let length:CGFloat = CGFloat(Float(String(cString: PQgetvalue(res, row, 1)))!)
         
         let GEOSGeom = GEOSWKTReader_read_r(GEOS_HANDLE, WKTReader, data)
 
         let geometryTypeId = GEOSGeomTypeId_r(GEOS_HANDLE, GEOSGeom)
         if geometryTypeId != GEOS_LINESTRING.rawValue {
-            print("Geometry must be a linestring")
+            print("Geometry must be a linestring, skipping")
             continue
         }
 
         let sequence = GEOSGeom_getCoordSeq_r(GEOS_HANDLE, GEOSGeom)
-        var numCoordinates: UInt32 = 0
-        GEOSCoordSeq_getSize_r(GEOS_HANDLE, sequence, &numCoordinates)
-        context?.beginPath()
-        
-        context?.setLineWidth(length)
-        context?.setStrokeColor(.white)
-        context?.setShadow(offset: CGSize(width: 0, height: 0), blur: 30, color: .white)
+        var tmpNumCoordinates: UInt32 = 0
+        GEOSCoordSeq_getSize_r(GEOS_HANDLE, sequence, &tmpNumCoordinates)
+        let numCoordinates = Int(tmpNumCoordinates)
+
+        var xy = Array(repeating: Array(repeating: Double(0.0), count: 2), count: numCoordinates)
         
         for i in 0 ..< numCoordinates {
 
-            var thisLongitude: Double = 0
-            var thisLatitude: Double = 0
-            GEOSCoordSeq_getX_r(GEOS_HANDLE, sequence, i, &thisLongitude)
-            GEOSCoordSeq_getY_r(GEOS_HANDLE, sequence, i, &thisLatitude)
+            var longitude: Double = 0
+            var latitude: Double = 0
+            
+            GEOSCoordSeq_getX_r(GEOS_HANDLE, sequence, UInt32(i), &longitude)
+            GEOSCoordSeq_getY_r(GEOS_HANDLE, sequence, UInt32(i), &latitude)
 
-            let thisX = (extents.minX - thisLongitude) * -1 * imageToLineWidthRatio * scale
-            let thisY = (thisLatitude - extents.minY)  * imageToLineHeightRatio * scale
+            xy[i][0] = (extents.minX - longitude) * -1 * imageToLineWidthRatio * scale
+            xy[i][1] = (latitude - extents.minY)  * imageToLineHeightRatio * scale
 
-            if (i == 0) {
-                context?.move(to: CGPoint(x: thisX, y: thisY))
-            } else {
-                context?.addLine(to: CGPoint(x: thisX, y: thisY))
-            }
         }
-
+        
+        // Drawing sequence
+        context?.beginPath()
+        context?.setLineWidth(length)
+        context?.setShadow(offset: CGSize(width: 0, height: 0), blur: length*3, color: darkBlue)
+        
+        for i in 0 ..< numCoordinates {
+            let p = CGPoint(x: xy[i][0], y: xy[i][1])
+            i == 0 ? context?.move(to: p) : context?.addLine(to: p)
+        }
         context?.strokePath()
         
         GEOSGeom_destroy_r(GEOS_HANDLE, GEOSGeom)
@@ -295,14 +293,13 @@ while hasData {
 
 print("Generating output to \(filePath)")
 
-if format == "png" {
+switch format {
+case .png:
     let image = context?.makeImage()
     let destination = CGImageDestinationCreateWithURL(url, kUTTypePNG, 1, nil)
     CGImageDestinationAddImage(destination!, image!, nil)
     CGImageDestinationFinalize(destination!)
-}
-
-if format == "pdf" {
+case .pdf:
     context?.endPDFPage()
     context?.closePDF()
 }

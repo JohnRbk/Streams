@@ -4,8 +4,11 @@ Generate beautiful images as PNG or vector PDF files from PostGIS, ideally suite
 
 ![US Rivers](Images/us-rivers.png)
 
-*(High-res image is available [here](us-rivers-high-res.png))*
+[Link to high-res image](Images/us-rivers-high-res.png)
 
+![US Rivers](Images/northeast.png)
+
+[Link to high-res image](Images/northeast-high-res.png)
 
 ## Getting Started 
 
